@@ -38,6 +38,14 @@ if (!window.Storage || typeof window.Storage.init !== 'function') {
      */
     VEHICLES: 'bus_vehicles',
     /**
+     * DRIVERS: 'bus_drivers'
+     * 用途：存储司机人员数据的 localStorage 键名
+     * 存储内容：JSON 格式的司机数组，每个司机包含 id、姓名、电话、车辆ID、工作状态、驾驶时长等信息
+     * 使用场景：人员调度模块的状态管理、车辆分配、时长统计等功能
+     * 示例数据格式：[{ id: 'D001', name: '张三', phone: '13800138000', vehicleId: 'V-001', status: 'working', drivingHours: 0, todayHours: 0 }]
+     */
+    DRIVERS: 'bus_drivers',
+    /**
      * INIT_FLAG: 'bus_app_initialized'
      * 用途：标记应用是否已完成首次数据初始化的 localStorage 键名
      * 存储内容：字符串 'true'，表示应用已经加载过初始数据
@@ -59,6 +67,13 @@ if (!window.Storage || typeof window.Storage.init !== 'function') {
       { id: 'V-003', routeId: '202', status: 'maintenance' },
       { id: 'V-004', routeId: '202', status: 'running' },
       { id: 'V-005', routeId: '303', status: 'running' }
+    ],
+    drivers: [
+      { id: 'D001', name: '李明', phone: '13800138001', vehicleId: 'V-001', status: 'working', drivingHours: 45.5, todayHours: 3.2 },
+      { id: 'D002', name: '王强', phone: '13800138002', vehicleId: 'V-002', status: 'resting', drivingHours: 62.3, todayHours: 1.5 },
+      { id: 'D003', name: '张伟', phone: '13800138003', vehicleId: 'V-004', status: 'working', drivingHours: 38.8, todayHours: 4.0 },
+      { id: 'D004', name: '刘洋', phone: '13800138004', vehicleId: '', status: 'off', drivingHours: 52.1, todayHours: 0 },
+      { id: 'D005', name: '陈峰', phone: '13800138005', vehicleId: 'V-005', status: 'leave', drivingHours: 71.5, todayHours: 0 }
     ]
   };
 
@@ -68,6 +83,7 @@ if (!window.Storage || typeof window.Storage.init !== 'function') {
       if (!localStorage.getItem(KEYS.INIT_FLAG)) {
         localStorage.setItem(KEYS.ROUTES, JSON.stringify(INITIAL_DATA.routes));
         localStorage.setItem(KEYS.VEHICLES, JSON.stringify(INITIAL_DATA.vehicles));
+        localStorage.setItem(KEYS.DRIVERS, JSON.stringify(INITIAL_DATA.drivers));
         localStorage.setItem(KEYS.INIT_FLAG, 'true');
       }
     },
@@ -82,6 +98,12 @@ if (!window.Storage || typeof window.Storage.init !== 'function') {
     },
     saveVehicles(vehicles) {
       localStorage.setItem(KEYS.VEHICLES, JSON.stringify(vehicles));
+    },
+    getDrivers() {
+      return JSON.parse(localStorage.getItem(KEYS.DRIVERS) || '[]');
+    },
+    saveDrivers(drivers) {
+      localStorage.setItem(KEYS.DRIVERS, JSON.stringify(drivers));
     }
   };
   
@@ -331,6 +353,8 @@ if (!window.ConfirmDialog) {
 import { RoutesModule } from './routes.js';
 // 导入车辆调度模块：负责车辆状态管理、筛选等功能
 import { VehiclesModule } from './vehicles.js';
+// 导入人员调度模块：负责司机管理、工作状态、车辆分配、驾驶时长统计
+import { DriversModule } from './drivers.js';
 // 导入站点查询模块：负责站点搜索、到站时间预估等功能
 import { StationsModule } from './stations.js';
 // 导入数据统计模块：负责运营数据统计、热门站点分析等功能
@@ -725,6 +749,12 @@ function runAppInit() {
     // 初始化自定义 Select 组件（车辆筛选）
     initVehicleFilter();
 
+    // 初始化自定义 Select 组件（司机筛选）
+    initDriverFilter();
+
+    // 初始化司机弹窗事件
+    bindDriverModalEvents();
+
     // 初始化线路搜索
     initRouteSearch();
 
@@ -811,6 +841,10 @@ function bindNavEvents() {
                     // 从自定义 Select 获取当前筛选值
                     const currentFilter = window.vehicleFilterInstance ? window.vehicleFilterInstance.getValue() : 'all';
                     VehiclesModule.render(currentFilter);
+                    break;
+                case 'page-drivers':
+                    const driverFilter = window.driverFilterInstance ? window.driverFilterInstance.getValue() : 'all';
+                    DriversModule.render(driverFilter);
                     break;
                 case 'page-stats': StatsModule.render(); break;
                 // page-routes 和 page-stations 的渲染已在 showPage 中处理，避免重复调用
@@ -1040,3 +1074,153 @@ function initRouteSearch() {
         searchIcon.innerHTML = window.Icons.search;
     }
 }
+
+/**
+ * 初始化司机筛选下拉框
+ * 创建自定义下拉选择组件，用于按工作状态筛选司机
+ */
+function initDriverFilter() {
+    const filterContainer = document.getElementById('driver-filter-container');
+    if (!filterContainer) return;
+
+    const driverFilter = new window.CustomSelect({
+        id: 'driver-filter',
+        placeholder: '全部人员',
+        value: 'all',
+        options: [
+            { value: 'all', label: '全部人员' },
+            { value: 'working', label: '工作中' },
+            { value: 'resting', label: '休息中' },
+            { value: 'off', label: '已下班' },
+            { value: 'leave', label: '请假' }
+        ],
+        onChange: (value) => {
+            DriversModule.render(value);
+        }
+    });
+
+    filterContainer.appendChild(driverFilter.container);
+    window.driverFilterInstance = driverFilter;
+
+    const addIcon = document.getElementById('icon-plus-driver');
+    if (addIcon && window.Icons) {
+        addIcon.innerHTML = window.Icons.plus;
+    }
+}
+
+/**
+ * 绑定司机弹窗事件
+ */
+function bindDriverModalEvents() {
+    const modal = document.getElementById('modal-driver');
+    const modalContent = document.getElementById('modal-driver-content');
+    const form = document.getElementById('form-driver');
+    const openBtn = document.getElementById('btn-add-driver');
+    const closeBtn = document.getElementById('btn-close-driver-modal');
+    const cancelBtn = document.getElementById('btn-cancel-driver-modal');
+
+    if (!modal || !form) return;
+
+    window.openDriverModal = () => {
+        form.reset();
+        form.elements['isEdit'].value = 'false';
+        form.elements['originalId'].value = '';
+        document.getElementById('modal-driver-title').innerText = '新增司机';
+        DriversModule.populateVehicleSelect();
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            modalContent.classList.remove('scale-95');
+        }, 10);
+    };
+
+    window.closeDriverModal = () => {
+        modal.classList.add('opacity-0');
+        modalContent.classList.add('scale-95');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+            form.reset();
+        }, 300);
+    };
+
+    if (openBtn) {
+        openBtn.addEventListener('click', window.openDriverModal);
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', window.closeDriverModal);
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', window.closeDriverModal);
+    }
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) window.closeDriverModal();
+    });
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const driverData = {
+            id: formData.get('id').trim(),
+            name: formData.get('name').trim(),
+            phone: formData.get('phone').trim(),
+            vehicleId: formData.get('vehicleId'),
+            status: formData.get('status') || 'resting'
+        };
+
+        if (!driverData.id || !driverData.name) {
+            window.UI.showToast('请填写必填项', 'error');
+            return;
+        }
+
+        const isEdit = form.elements['isEdit'].value === 'true';
+        const originalId = form.elements['originalId'].value;
+
+        if (isEdit) {
+            DriversModule.update(originalId, driverData);
+        } else {
+            const drivers = window.Storage.getDrivers();
+            if (drivers.find(d => d.id === driverData.id)) {
+                window.UI.showToast('司机编号已存在', 'error');
+                return;
+            }
+            DriversModule.add(driverData);
+        }
+
+        window.closeDriverModal();
+    });
+
+    window.updateDriverStatus = (id, status) => {
+        DriversModule.updateStatus(id, status);
+    };
+
+    window.editDriver = (id) => {
+        const driver = DriversModule.getById(id);
+        if (!driver) return;
+
+        form.elements['isEdit'].value = 'true';
+        form.elements['originalId'].value = id;
+        form.elements['id'].value = driver.id;
+        form.elements['name'].value = driver.name;
+        form.elements['phone'].value = driver.phone || '';
+        DriversModule.populateVehicleSelect();
+        form.elements['vehicleId'].value = driver.vehicleId || '';
+        
+        const statusRadio = form.querySelector(`input[name="status"][value="${driver.status}"]`);
+        if (statusRadio) statusRadio.checked = true;
+
+        document.getElementById('modal-driver-title').innerText = '编辑司机';
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            modal.classList.remove('opacity-0');
+            modalContent.classList.remove('scale-95');
+        }, 10);
+    };
+
+    window.deleteDriver = (id) => {
+        DriversModule.delete(id);
+    };
+}
+
